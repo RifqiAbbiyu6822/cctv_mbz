@@ -1,0 +1,8 @@
+ultralytics==8.0.20
+opencv-python
+PyQt5
+pyinstaller
+numpy
+torch
+torchvision
+Pillow
