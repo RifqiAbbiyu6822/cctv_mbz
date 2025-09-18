@@ -147,6 +147,7 @@ class VideoThread(QThread):
     progress_signal = pyqtSignal(int)
     duration_signal = pyqtSignal(int)
     position_signal = pyqtSignal(int)
+    fps_signal = pyqtSignal(float)
     
     def __init__(self, video_source, model_path, tracking_enabled=True, is_file=False):
         super().__init__()
@@ -160,6 +161,8 @@ class VideoThread(QThread):
         self.cap = None
         self.total_frames = 0
         self.current_frame = 0
+        self._last_time = None
+        self._fps_smooth = 0.0
         
     def run(self):
         """
@@ -212,6 +215,18 @@ class VideoThread(QThread):
                         frame, 
                         tracking=self.tracking_enabled
                     )
+
+                    # Hitung FPS sederhana (exponential moving average)
+                    now = cv2.getTickCount() / cv2.getTickFrequency()
+                    if self._last_time is not None:
+                        dt = max(now - self._last_time, 1e-6)
+                        inst_fps = 1.0 / dt
+                        if self._fps_smooth == 0.0:
+                            self._fps_smooth = inst_fps
+                        else:
+                            self._fps_smooth = 0.9 * self._fps_smooth + 0.1 * inst_fps
+                        self.fps_signal.emit(float(self._fps_smooth))
+                    self._last_time = now
                     
                     # Konversi frame ke format yang bisa ditampilkan di Qt
                     rgb_image = cv2.cvtColor(frame_processed, cv2.COLOR_BGR2RGB)
@@ -563,6 +578,7 @@ class App(QWidget):
             self.thread.change_pixmap_signal.connect(self.update_image)
             self.thread.update_count_signal.connect(self.update_count)
             self.thread.error_signal.connect(self.show_error)
+            self.thread.fps_signal.connect(self.update_fps)
             
             if is_file:
                 self.thread.progress_signal.connect(self.update_progress)
@@ -631,7 +647,9 @@ class App(QWidget):
         """Reset counter mobil"""
         if self.thread and self.thread.car_counter:
             self.thread.reset_counter()
-            self.count_label.setText('Jumlah Mobil: 0')
+            self.count_label.setText('Jumlah Mobil (Total): 0')
+            self.count_jakarta_label.setText('Arah Jakarta: 0')
+            self.count_bandung_label.setText('Arah Bandung: 0')
             self.log_message("Counter direset")
         else:
             QMessageBox.information(self, "Info", "Tidak ada stream yang aktif")
@@ -649,6 +667,13 @@ class App(QWidget):
         self.count_label.setText(f'Jumlah Mobil (Total): {total_count}')
         self.count_jakarta_label.setText(f'Arah Jakarta: {jkt}')
         self.count_bandung_label.setText(f'Arah Bandung: {bdg}')
+
+    def update_fps(self, fps_value):
+        """Update label FPS"""
+        try:
+            self.fps_label.setText(f'FPS: {fps_value:.1f}')
+        except Exception:
+            pass
     
     def update_progress(self, progress):
         """Update progress bar"""
