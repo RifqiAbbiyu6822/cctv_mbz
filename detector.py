@@ -39,52 +39,103 @@ class CarCounter:
         self.line_thickness = 3
         self.detection_zone = 50  # Zona deteksi di sekitar garis
         
+        # Performance tracking untuk aplikasi GUI
+        self.frame_count = 0
+        self.start_time = None
+        self.last_fps_time = time.time()
+        self.fps_counter = 0
+        self.current_fps = 0
+        
         # Debug info
         self.debug = True
         
-    def set_counting_line(self, frame_height, line_ratio=0.5):
+    def set_counting_line(self, frame_height, line_ratio=0.7):
         """
-        Set posisi garis penghitungan (default di tengah frame)
+        Set posisi garis penghitungan (default mendekat ke bawah)
         
         Args:
             frame_height: Tinggi frame
-            line_ratio: Rasio posisi garis (0.0-1.0)
+            line_ratio: Rasio posisi garis (0.0-1.0) - 0.7 = 70% dari atas (mendekat ke bawah)
         """
         self.counting_line_y = int(frame_height * line_ratio)
         if self.debug:
-            print(f"Counting line set at y={self.counting_line_y}")
+            print(f"Counting line set at y={self.counting_line_y} (70% from top)")
     
-    def process_frame(self, frame, tracking=True):
+    def set_counting_line_position(self, y_position):
+        """
+        Set posisi garis penghitungan secara langsung
+        
+        Args:
+            y_position: Posisi Y dalam pixel
+        """
+        self.counting_line_y = y_position
+        if self.debug:
+            print(f"Counting line position set to y={self.counting_line_y}")
+    
+    def set_detection_zone(self, zone_size):
+        """
+        Set ukuran zona deteksi di sekitar garis
+        
+        Args:
+            zone_size: Ukuran zona dalam pixel
+        """
+        self.detection_zone = zone_size
+        if self.debug:
+            print(f"Detection zone set to {self.detection_zone} pixels")
+    
+    def process_frame(self, frame, tracking=True, confidence=0.25, iou=0.45):
         """
         Proses frame untuk deteksi dan penghitungan mobil
         
         Args:
             frame: Frame video dari OpenCV
             tracking (bool): Apakah menggunakan tracking atau tidak
+            confidence (float): Confidence threshold untuk deteksi
+            iou (float): IoU threshold untuk NMS
             
         Returns:
             tuple: (frame_processed, counts)
         """
+        # Initialize timing untuk performa tracking
+        if self.start_time is None:
+            self.start_time = time.time()
+        
+        # Update frame count dan FPS
+        self.frame_count += 1
+        self.fps_counter += 1
+        
+        # Calculate FPS setiap 30 frame
+        current_time = time.time()
+        if self.fps_counter >= 30:
+            elapsed = current_time - self.last_fps_time
+            self.current_fps = self.fps_counter / elapsed if elapsed > 0 else 0
+            self.fps_counter = 0
+            self.last_fps_time = current_time
+        
         # Set garis penghitungan jika belum diset
         if self.counting_line_y is None:
             self.set_counting_line(frame.shape[0])
         
-        # Deteksi mobil dengan YOLO
+        # Deteksi mobil dengan YOLO - menggunakan parameter yang bisa disesuaikan
         if tracking:
             results = self.model.track(
                 frame, 
                 persist=True, 
                 classes=[0, 5, 7],  # Classes: car, bus, truck dalam COCO dataset
                 tracker="bytetrack.yaml",
-                conf=0.3,    # Confidence threshold
-                iou=0.5      # IoU threshold
+                conf=confidence,   # Confidence threshold dari parameter
+                iou=iou,          # IoU threshold dari parameter
+                verbose=False,    # Disable verbose untuk performa
+                device='cpu' if not self.debug else None  # Force CPU untuk stabilitas GUI
             )
         else:
             results = self.model(
                 frame,
                 classes=[0, 5, 7],  # Classes: car, bus, truck
-                conf=0.3,
-                iou=0.5
+                conf=confidence,
+                iou=iou,
+                verbose=False,
+                device='cpu' if not self.debug else None
             )
         
         # Gambar garis penghitungan
@@ -213,65 +264,81 @@ class CarCounter:
             del self.tracked_objects[track_id]
     
     def draw_counting_line(self, frame):
-        """Gambar garis penghitungan"""
+        """Gambar garis penghitungan - minimalist"""
         height, width = frame.shape[:2]
         
-        # Garis penghitungan utama
+        # Garis penghitungan utama - lebih tipis
         cv2.line(frame, (0, self.counting_line_y), (width, self.counting_line_y), 
-                (0, 255, 0), self.line_thickness)
+                (0, 255, 0), 1)
         
-        # Zona deteksi (opsional, untuk debug)
-        if self.debug:
-            # Garis atas zona
-            cv2.line(frame, (0, self.counting_line_y - self.detection_zone), 
-                    (width, self.counting_line_y - self.detection_zone), (0, 255, 0), 1)
-            # Garis bawah zona  
-            cv2.line(frame, (0, self.counting_line_y + self.detection_zone), 
-                    (width, self.counting_line_y + self.detection_zone), (0, 255, 0), 1)
-        
-        # Label garis
-        cv2.putText(frame, 'COUNTING LINE', (10, self.counting_line_y - 10), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        # Label garis - lebih kecil dan minimal
+        cv2.putText(frame, 'COUNT', (10, self.counting_line_y - 5), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 1)
     
     def draw_detection(self, frame, box, label, center_x, center_y):
-        """Gambar bounding box dan info deteksi"""
+        """Gambar bounding box dan info deteksi - minimalist"""
         x1, y1, x2, y2 = box
         
-        # Bounding box
-        cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 0, 0), 2)
+        # Bounding box - lebih tipis dan minimal
+        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 1)
         
-        # Label
-        cv2.putText(frame, label, (x1, y1 - 10), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2)
+        # Label - hanya ID jika ada, lebih kecil
+        if "ID:" in label:
+            # Extract ID only
+            id_part = label.split()[0]  # Get "ID:123" part
+            cv2.putText(frame, id_part, (x1, y1 - 5), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 1)
         
-        # Titik pusat
-        cv2.circle(frame, (center_x, center_y), 5, (0, 0, 255), -1)
+        # Titik pusat - lebih kecil
+        cv2.circle(frame, (center_x, center_y), 2, (0, 0, 255), -1)
     
     def draw_counter_info(self, frame):
-        """Gambar informasi counter di frame"""
-        # Background untuk text
+        """Gambar informasi counter di frame - minimalist"""
+        # Background untuk text - lebih kecil dan minimal
         overlay = frame.copy()
-        cv2.rectangle(overlay, (10, 10), (400, 120), (0, 0, 0), -1)
+        cv2.rectangle(overlay, (10, 10), (300, 80), (0, 0, 0), -1)
         cv2.addWeighted(overlay, 0.7, frame, 0.3, 0, frame)
         
-        # Counter info
-        cv2.putText(frame, f"Total Vehicles: {self.counts['total']}", 
-                   (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
-        cv2.putText(frame, f"Going Up: {self.counts['up']}", 
-                   (20, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-        cv2.putText(frame, f"Going Down: {self.counts['down']}", 
-                   (20, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+        # Counter info utama - hanya yang penting
+        cv2.putText(frame, f"Total: {self.counts['total']}", 
+                   (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        cv2.putText(frame, f"Up: {self.counts['up']} | Down: {self.counts['down']}", 
+                   (20, 55), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+        
+        # FPS info - minimal
+        cv2.putText(frame, f"FPS: {self.current_fps:.1f}", 
+                   (20, 75), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (150, 150, 150), 1)
     
     def reset_counter(self):
         """Reset counter dan tracking data"""
         self.counts = {'total': 0, 'up': 0, 'down': 0}
         self.tracked_objects.clear()
+        
+        # Reset performance tracking
+        self.frame_count = 0
+        self.start_time = None
+        self.fps_counter = 0
+        self.current_fps = 0
+        self.last_fps_time = time.time()
+        
         if self.debug:
             print("Counter reset!")
     
     def get_count(self):
         """Mendapatkan total jumlah kendaraan"""
         return self.counts['total']
+    
+    def get_performance_info(self):
+        """Mendapatkan informasi performa untuk aplikasi GUI"""
+        elapsed_time = 0
+        if self.start_time:
+            elapsed_time = time.time() - self.start_time
+        
+        return {
+            'fps': self.current_fps,
+            'frame_count': self.frame_count,
+            'elapsed_time': elapsed_time
+        }
     
     def set_debug(self, debug=True):
         """Enable/disable debug mode"""
